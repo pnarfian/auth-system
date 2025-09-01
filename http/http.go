@@ -3,6 +3,7 @@ package https
 import (
 	"auth-system/interfaces"
 	request "auth-system/models/requests"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator"
@@ -91,9 +92,10 @@ func (h Http) Login(c *gin.Context) {
 }
 
 func (h Http) Logout(c *gin.Context) {
-	tokenID, _ := c.Get("tokenID")
-	ID := tokenID.(float64)
-	err := h.uc.Logout(int(ID))
+	ID, _ := c.Get("UserID")
+	userIDStr, _ := ID.(string)
+	userID, _ := strconv.Atoi(userIDStr)
+	err := h.uc.Logout(userID)
 
 	if err != nil {
 		c.JSON(400, gin.H{
@@ -145,7 +147,7 @@ func (h Http) Forgot(c *gin.Context) {
 }
 
 func (h Http) Reset(c *gin.Context) {
-		requestBody := &request.ResetRequest{}
+	requestBody := &request.ResetRequest{}
 	err := c.ShouldBindJSON(&requestBody)
 	if err != nil {
 		c.JSON(400, gin.H {
@@ -178,5 +180,32 @@ func (h Http) Reset(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"message": "Password successfully changed",
+	})
+}
+
+func (h Http) Delete(c *gin.Context) {
+	ID, _ := c.Get("UserID")
+	userIDStr, _ := ID.(string)
+	userID, _ := strconv.Atoi(userIDStr)
+	err := h.uc.Delete(userID)
+
+	if err != nil {
+		c.JSON(400, gin.H{
+			"error": err.Error(),
+		})
+
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "Account Deleted Successfully",
+	})
+}
+
+func (h Http) Test(c *gin.Context) {
+	userID, _ := c.Get("UserID")
+
+	c.JSON(200, gin.H{
+		"userID": userID,
 	})
 }

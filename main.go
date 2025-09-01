@@ -7,18 +7,21 @@ import (
 	"auth-system/repositories"
 	"auth-system/services"
 	"auth-system/usecases"
+	"context"
 	"errors"
 	"fmt"
 	"log"
 
-	//"net/smtp"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+var ctx = context.Background()
 
 func setUpDatabase() (*gorm.DB, error) {
 	if err := godotenv.Load(); err != nil {
@@ -66,13 +69,30 @@ func setUpDatabase() (*gorm.DB, error) {
 	return db, nil
 }
 
+func setUpRedis() (*redis.Client, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		Password: "",
+		DB: 0,
+	})
+
+	
+	_, err := client.Ping(ctx).Result()
+	return client, err
+}
 
 
 func main() {
 	router := gin.Default()
 	db, err := setUpDatabase()
 	if err != nil {
-		fmt.Println("Failed to set up")
+		fmt.Println("Failed to set up db")
+		return
+	}
+	
+	redisC, err := setUpRedis()
+	if err != nil {
+		fmt.Println("Failed to set up redis " + redisC.Options().Addr)
 		return
 	}
 
@@ -84,16 +104,17 @@ func main() {
 
 	repo := repositories.NewRepository(db)
 	emailService := services.NewEmailService(smtpServer, smtpPort, smtpUser, smtpPassword, repo)
-	useCase := usecases.NewUseCase(repo, secretKey, emailService)
+	useCase := usecases.NewUseCase(repo, secretKey, emailService, redisC, ctx)
 	handler := https.NewHttp(useCase)
-	middleware := middleware.NewAuthMiddleware(repo, secretKey)
-
+	middleware := middleware.NewAuthMiddleware(repo, secretKey, redisC)
 
 	router.POST("user/register", handler.Register)
 	router.POST("user/login", handler.Login)
 	router.POST("user/logout", middleware.Authorization(), handler.Logout)
 	router.POST("user/forgot", handler.Forgot)
 	router.POST("user/reset", handler.Reset)
+	router.POST("user/delete", middleware.Authorization(), handler.Delete)
+	router.POST("user/test", middleware.Authorization(), handler.Test)
 
 	router.Run()
 }

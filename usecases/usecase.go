@@ -5,11 +5,13 @@ import (
 	"auth-system/models"
 	request "auth-system/models/requests"
 	"auth-system/services"
+	"context"
 	"errors"
 	"regexp"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -17,10 +19,12 @@ type UseCase struct {
 	repo interfaces.Repository
 	secretKey []byte
 	email services.EmailService
+	client *redis.Client
+	ctx context.Context
 }
 
-func NewUseCase(r interfaces.Repository, s string, e services.EmailService) (UseCase) {
-	return UseCase{repo: r, secretKey: []byte(s), email: e}
+func NewUseCase(r interfaces.Repository, s string, e services.EmailService, c *redis.Client, ctx context.Context) (UseCase) {
+	return UseCase{repo: r, secretKey: []byte(s), email: e, client: c, ctx: ctx}
 }
 
 func (u UseCase) Register(data *request.RegisterRequest) (error) {
@@ -64,11 +68,13 @@ func (u UseCase) Login(data *request.LoginRequest) (string, error) {
 	user, err := u.repo.GetUserByUsername(data.Username)
 	if err != nil {
 		return "", err
+	} else if user.Username == ""{
+		return "", errors.New("incorrect username or password")
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(data.Password))
 	if err != nil {
-		return "", err
+		return "", errors.New("incorrect password")
 	}
 
 	accessToken := &models.Access_Token{
@@ -84,7 +90,7 @@ func (u UseCase) Login(data *request.LoginRequest) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256,
 		jwt.MapClaims{
 			"id": tokenID,
-			"exp": time.Now().Add(time.Hour * 24).Unix(),
+			"exp": time.Now().Add(time.Hour * 6).Unix(),
 	})
 
 	tokenString, err := token.SignedString(u.secretKey)
@@ -92,11 +98,16 @@ func (u UseCase) Login(data *request.LoginRequest) (string, error) {
 		return "", err
 	}
 
+	err = u.client.Set(u.ctx, tokenString, user.ID, time.Minute * 30).Err()
+	if err != nil {
+		return "", err
+	}
+
 	return tokenString, nil
 }
 
-func (u UseCase) Logout(tokenID int) (error) {
-	err := u.repo.RevokeToken(tokenID)
+func (u UseCase) Logout(userID int) (error) {
+	err := u.repo.RevokeToken(userID)
 
 	return err
 }
@@ -150,6 +161,21 @@ func (u UseCase) Reset(data *request.ResetRequest, token string) (error) {
 	}
 
 	err = u.repo.UpdateResetToken(resetToken)
+	return err
+}
+
+func (u UseCase) Delete(userID int) (error) {
+	user, err := u.repo.GetUser(userID)
+	if err != nil {
+		return err
+	}
+
+	err = u.repo.RevokeToken(userID)
+	if err != nil {
+		return err
+	}
+
+	err = u.repo.DeleteUser(user)
 	return err
 }
 
